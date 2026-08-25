@@ -24,7 +24,13 @@ app.listen(PORT,()=>{
 
 connectDb()
 
+//BODY PARSER
+
+app.use(express.json())
+app.use(express.urlencoded())
+
 
 //AUTH ROUTES
 
 app.use("/api/auth",authRoutes)
+
