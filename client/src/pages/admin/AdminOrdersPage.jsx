@@ -1,3 +1,5 @@
+import { useLocation } from 'react-router-dom'
+
 import React, { useEffect, useState } from 'react';
 import {
     Users,
@@ -45,8 +47,13 @@ export default function AdminOrdersPage({ onNavigate }) {
 
     const { user } = useSelector(state => state.auth)
 
+    let { pathname } = useLocation()
 
-    const [activeSection, setActiveSection] = useState('products');
+    let currentPath = pathname.split("/")[pathname.split("/").length - 1]
+
+
+
+    const [activeSection, setActiveSection] = useState('Admin');
     const [isAddProductOpen, setIsAddProductOpen] = useState(false);
 
 
@@ -87,7 +94,7 @@ export default function AdminOrdersPage({ onNavigate }) {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                         <h1 className="text-2xl font-extrabold text-slate-900 capitalize">
-                            {activeSection} Overview
+                            {currentPath.toUpperCase()} OVERVIEW
                         </h1>
                         <p className="text-xs text-slate-500 mt-0.5">
                             Live hospital operations, verification workflows, and pharmaceutical stock control.
@@ -140,51 +147,44 @@ export default function AdminOrdersPage({ onNavigate }) {
 
                     {/* DYNAMIC DATA TABLE BY SECTION */}
                     <div className="overflow-x-auto">
-                        {/* 4. ORDERS TABLE */}
-                        {activeSection === 'orders' && (
-                            <table className="w-full text-left text-xs text-slate-600">
-                                <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-400 font-bold border-b border-slate-200">
-                                    <tr>
-                                        <th className="py-3 px-4">Order ID</th>
-                                        <th className="py-3 px-4">Patient Name</th>
-                                        <th className="py-3 px-4">Items</th>
-                                        <th className="py-3 px-4">Total</th>
-                                        <th className="py-3 px-4">Date</th>
-                                        <th className="py-3 px-4">Fulfillment Status</th>
-                                        <th className="py-3 px-4 text-right">Actions</th>
+
+                        <table className="w-full text-left text-xs text-slate-600">
+                            <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-400 font-bold border-b border-slate-200">
+                                <tr>
+                                    <th className="py-3 px-4">Order ID</th>
+                                    <th className="py-3 px-4">Patient Name</th>
+                                    <th className="py-3 px-4">Items</th>
+                                    <th className="py-3 px-4">Total</th>
+                                    <th className="py-3 px-4">Date</th>
+                                    <th className="py-3 px-4">Fulfillment Status</th>
+                                    <th className="py-3 px-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {MOCK_ORDERS_DATA.map((row) => (
+                                    <tr key={row.id} className="hover:bg-slate-50/70 transition-colors">
+                                        <td className="py-3 px-4 font-mono font-bold text-slate-900">{row.id}</td>
+                                        <td className="py-3 px-4">{row.user}</td>
+                                        <td className="py-3 px-4">{row.items}</td>
+                                        <td className="py-3 px-4 font-bold text-slate-900">{row.total}</td>
+                                        <td className="py-3 px-4">{row.date}</td>
+                                        <td className="py-3 px-4">
+                                            <Badge variant={row.badgeVariant} size="sm" dot>{row.status}</Badge>
+                                        </td>
+                                        <td className="py-3 px-4 text-right">
+                                            <button className="text-teal-600 font-semibold hover:underline">Update Tracking</button>
+                                        </td>
                                     </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {MOCK_ORDERS_DATA.map((row) => (
-                                        <tr key={row.id} className="hover:bg-slate-50/70 transition-colors">
-                                            <td className="py-3 px-4 font-mono font-bold text-slate-900">{row.id}</td>
-                                            <td className="py-3 px-4">{row.user}</td>
-                                            <td className="py-3 px-4">{row.items}</td>
-                                            <td className="py-3 px-4 font-bold text-slate-900">{row.total}</td>
-                                            <td className="py-3 px-4">{row.date}</td>
-                                            <td className="py-3 px-4">
-                                                <Badge variant={row.badgeVariant} size="sm" dot>{row.status}</Badge>
-                                            </td>
-                                            <td className="py-3 px-4 text-right">
-                                                <button className="text-teal-600 font-semibold hover:underline">Update Tracking</button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        )}
+                                ))}
+                            </tbody>
+                        </table>
 
                     </div>
                 </Card>
 
             </main>
 
-            {/* MODAL: ADD PRODUCT */}
-            <AddProductModal
-                isOpen={isAddProductOpen}
-                onClose={() => setIsAddProductOpen(false)}
-                onSave={() => setIsAddProductOpen(false)}
-            />
+
 
 
 
