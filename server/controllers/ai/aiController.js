@@ -8,25 +8,68 @@ import Pathologist from "../../models/pathologistModel.js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// Single place to change the model used by every AI feature.
-const AI_MODEL = "gemini-3.8-flash";
+// Model fallback chain: if the newest flash model is saturated (503) or has
+// been retired (404), automatically try the next one down.
+const AI_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.5-flash",
+];
 
-// Gemini occasionally returns transient 503 "high demand" errors, so retry
-// those a couple of times before surfacing the failure to the client.
-async function generateContent(params, attempts = 3) {
-    for (let attempt = 1; ; attempt++) {
-        try {
-            return await ai.models.generateContent(params);
-        } catch (error) {
-            const isTransient = /503|UNAVAILABLE|overloaded|high demand/i.test(
-                String(error?.message || "")
-            );
-            if (!isTransient || attempt >= attempts) {
-                throw error;
+const isTransientError = (message = "") =>
+    /503|UNAVAILABLE|overloaded|high demand|429|RESOURCE_EXHAUSTED|rate limit/i.test(message);
+
+const isModelUnavailableError = (message = "") =>
+    /404|NOT_FOUND|no longer available|not found/i.test(message);
+
+const isQuotaError = (message = "") =>
+    /429|RESOURCE_EXHAUSTED|quota/i.test(message);
+
+// Retries transient 503s (with a short delay) and falls back to the next
+// model in the chain when the current one is overloaded or unavailable.
+async function generateContent(params) {
+    let lastError;
+
+    for (const model of AI_MODELS) {
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                return await ai.models.generateContent({ ...params, model });
+            } catch (error) {
+                lastError = error;
+                const message = String(error?.message || "");
+
+                if (!isTransientError(message) && !isModelUnavailableError(message)) {
+                    throw error; // programming/validation error — don't retry
+                }
+
+                if (isModelUnavailableError(message)) {
+                    break; // this model is gone; move to the next one immediately
+                }
+
+                if (attempt < 2) {
+                    await new Promise((resolve) => setTimeout(resolve, 2000));
+                }
             }
-            await new Promise((resolve) => setTimeout(resolve, 2000));
         }
     }
+
+    throw lastError;
+}
+
+// Turn SDK errors into something a user can actually act on.
+function describeAiError(error) {
+    const message = String(error?.message || "");
+
+    if (isQuotaError(message)) {
+        return "The AI service has reached its usage limit for now. Please try again in a minute.";
+    }
+    if (isTransientError(message)) {
+        return "The AI service is busy right now. Please try again in a few moments.";
+    }
+    if (isModelUnavailableError(message)) {
+        return "The configured AI model is unavailable. Please try again later.";
+    }
+    return message;
 }
 
 const PROMPT = `
@@ -96,7 +139,6 @@ const explainPrescription = async (req, res) => {
         const base64 = fileToBase64(filePath);
 
         const response = await generateContent({
-            model: AI_MODEL,
             contents: [
                 {
                     role: "user",
@@ -140,7 +182,8 @@ const explainPrescription = async (req, res) => {
 
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: "Extraction failed", details: err.message });
+        const busy = isTransientError(String(err?.message || ""));
+        res.status(busy ? 503 : 500).json({ error: "Extraction failed", details: describeAiError(err) });
     } finally {
         safeUnlink(filePath); // cleanup temp file
     }
@@ -237,7 +280,6 @@ Here is the data: ${data}
 `
 
         const response = await generateContent({
-            model: AI_MODEL,
             contents: [
                 {
                     role: "user",
@@ -257,7 +299,8 @@ Here is the data: ${data}
 
     } catch (error) {
         console.error(error);
-        res.status(502).json({ error: "Error In Getting Data From Server!", details: error.message })
+        const busy = isTransientError(String(error?.message || ""));
+        res.status(busy ? 503 : 502).json({ error: "Error In Getting Data From Server!", details: describeAiError(error) })
     }
 }
 
@@ -280,7 +323,6 @@ const chatWithAi = async (req, res) => {
 
     try {
         const response = await generateContent({
-            model: AI_MODEL,
             contents: [
                 {
                     role: "user",
@@ -295,7 +337,8 @@ const chatWithAi = async (req, res) => {
 
     } catch (error) {
         console.log(error.message)
-        res.status(502).json({ error: "Error In Getting Data From Server!", details: error.message })
+        const busy = isTransientError(String(error?.message || ""));
+        res.status(busy ? 503 : 502).json({ error: "Error In Getting Data From Server!", details: describeAiError(error) })
     }
 }
 
