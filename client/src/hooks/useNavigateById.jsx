@@ -25,9 +25,10 @@ const VIEW_ROUTES = {
   'ai-symptoms': '/ai/symptoms',
 };
 
-// Returns an onNavigate(viewId) handler backed by React Router,
-// so components can keep navigating by view id.
+// Returns an onNavigate(viewId, options) handler backed by React Router,
+// so components can keep navigating by view id, while optionally passing
+// `state`/`replace` through to navigate().
 export default function useNavigateById() {
   const navigate = useNavigate();
-  return (viewId) => navigate(VIEW_ROUTES[viewId] ?? '/');
+  return (viewId, options) => navigate(VIEW_ROUTES[viewId] ?? '/', options);
 }

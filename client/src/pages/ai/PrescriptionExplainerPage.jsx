@@ -129,6 +129,21 @@ export default function PrescriptionExplainerPage() {
 
   const medicines = prescription?.medicines || [];
 
+  // Hand the prescription context to the pharmacy page so it can show which
+  // prescribed medicines are available instead of dropping the user on a
+  // generic product grid.
+  const goToPharmacy = (focusMedicine) =>
+    onNavigate('pharmacy', {
+      state: {
+        prescription: {
+          id: prescription?._id,
+          medicines,
+          availability: availability?.medicines || null,
+        },
+        focusMedicine,
+      },
+    });
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-10">
 
@@ -279,7 +294,7 @@ export default function PrescriptionExplainerPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => onNavigate('pharmacy')}
+                onClick={() => goToPharmacy()}
                 icon={Pill}
               >
                 Order All Medicines via Pharmacy
@@ -359,7 +374,7 @@ export default function PrescriptionExplainerPage() {
                       <Button
                         variant="primary"
                         size="sm"
-                        onClick={() => onNavigate('pharmacy')}
+                        onClick={() => goToPharmacy(med.name)}
                       >
                         Order Now
                       </Button>
