@@ -1,89 +1,109 @@
-import React, { useState } from 'react';
-import { 
-  Sparkles, 
-  Send, 
-  Paperclip, 
-  Mic, 
-  Bot, 
-  User, 
-  ShieldCheck, 
-  RotateCcw, 
-  Info, 
-  ArrowRight,
-  Stethoscope
+import React, { useEffect, useRef, useState } from 'react';
+import { useSelector } from 'react-redux';
+import {
+  Sparkles,
+  Send,
+  Paperclip,
+  Mic,
+  Bot,
+  User,
+  RotateCcw,
+  Stethoscope,
+  AlertTriangle,
 } from 'lucide-react';
 import Card from '../../components/common/Card';
 import Badge from '../../components/common/Badge';
 import Button from '../../components/common/Button';
 import useNavigateById from '../../hooks/useNavigateById';
+import aiService from '../../services/aiService';
 
-// ==========================================
-// MOCK DATA (Hardcoded for teaching purposes)
-// Later replace with: api.ai.sendChatMessage({ message, history })
-// ==========================================
-
-const MOCK_PROMPT_SUGGESTIONS = [
+const PROMPT_SUGGESTIONS = [
   'Explain my elevated fasting blood sugar (115 mg/dL)',
   'Can I take ibuprofen with amoxicillin?',
   'Safe home remedies for persistent dry cough',
   'When should I see an urgent care doctor for migraine?',
 ];
 
-const INITIAL_MESSAGES = [
-  {
-    id: 1,
-    sender: 'ai',
-    text: "Hello Sarah! I am MediTrust's Clinical AI Assistant. I can help interpret laboratory numbers, explain prescription instructions, or evaluate mild symptoms to guide your care.",
-    time: '10:14 AM',
-    sources: ['UpToDate Clinical Consensus', 'Mayo Clinic Evidence Base'],
-  },
-  {
-    id: 2,
-    sender: 'user',
-    text: 'My doctor prescribed Amoxicillin 500mg for bronchitis, but my stomach feels slightly unsettled. Should I keep taking it, and can I take probiotics?',
-    time: '10:15 AM',
-  },
-  {
-    id: 3,
-    sender: 'ai',
-    text: `Mild gastrointestinal discomfort is one of the most common and expected side effects of broad-spectrum antibiotics like Amoxicillin as it alters temporary gut flora.
+const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-Here is clinical guidance:
-1. **Never stop early**: Discontinuing your antibiotic prematurely can lead to bacterial resistance and recurrence of your bronchitis.
-2. **Take with meals**: Taking Amoxicillin alongside food or a light snack substantially mitigates stomach upset.
-3. **Probiotics are helpful**: You can take probiotics, but space them at least 2 hours apart from your antibiotic dose so the Amoxicillin does not neutralize the active probiotic cultures.
-
-⚠️ *Warning*: If you develop severe watery diarrhea, fever, or allergic hives, discontinue and consult Dr. Jenkins immediately.`,
-    time: '10:15 AM',
-    sources: ['FDA Antibiotic Monograph', 'American College of Gastroenterology'],
-  },
-];
+const WELCOME_MESSAGE = {
+  id: 1,
+  sender: 'ai',
+  text: "Hello! I am MediTrust's Clinical AI Assistant. I can help interpret laboratory numbers, explain what your prescription instructions mean, or give general guidance on mild symptoms. I can't diagnose conditions or replace a real doctor.",
+  time: now(),
+};
 
 export default function AiChatPage() {
   const onNavigate = useNavigateById();
-  const [messages, setMessages] = useState(INITIAL_MESSAGES);
-  const [inputText, setInputText] = useState('');
-  const [isTyping, setIsTyping] = useState(true);
+  const { user } = useSelector((state) => state.auth);
 
-  const handleSendMessage = () => {
-    if (!inputText.trim()) return;
+  const [messages, setMessages] = useState([WELCOME_MESSAGE]);
+  const [inputText, setInputText] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [error, setError] = useState('');
+
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, isSending]);
+
+  const appendMessage = (msg) => setMessages((prev) => [...prev, msg]);
+
+  const handleSendMessage = async () => {
+    const text = inputText.trim();
+    if (!text || isSending) return;
+
     const userMsg = {
-      id: messages.length + 1,
+      id: Date.now(),
       sender: 'user',
-      text: inputText,
-      time: 'Just now',
+      text,
+      time: now(),
     };
-    setMessages([...messages, userMsg]);
+
+    appendMessage(userMsg);
     setInputText('');
+    setError('');
+    setIsSending(true);
+
+    try {
+      if (!user?.token) {
+        throw new Error('Please log in to chat with MediTrust AI.');
+      }
+
+      const data = await aiService.chatWithAi({ text, token: user.token });
+
+      appendMessage({
+        id: Date.now() + 1,
+        sender: 'ai',
+        text: data.reply || "I couldn't generate a response. Please try rephrasing your question.",
+        time: now(),
+      });
+    } catch (err) {
+      setError(
+        err?.response?.data?.details ||
+          err?.response?.data?.error ||
+          err?.message ||
+          'MediTrust AI is unavailable right now. Please try again.'
+      );
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const handleSelectPrompt = (prompt) => {
     setInputText(prompt);
   };
 
+  const handleReset = () => {
+    setMessages([{ ...WELCOME_MESSAGE, time: now() }]);
+    setError('');
+    setInputText('');
+  };
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-      
+
       {/* Top Header Card */}
       <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -94,11 +114,11 @@ export default function AiChatPage() {
             <div className="flex items-center gap-2">
               <h1 className="text-base font-bold text-slate-900">MediTrust AI Clinical Companion</h1>
               <Badge variant="purple" size="sm" dot>
-                Clinical v4.2 Active
+                Online
               </Badge>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Trained on peer-reviewed clinical guidelines • HIPAA secure session
+              General health guidance • Not a substitute for a doctor
             </p>
           </div>
         </div>
@@ -112,20 +132,21 @@ export default function AiChatPage() {
           >
             Connect with Real Doctor
           </Button>
-          <button
-            onClick={() => setIsTyping(!isTyping)}
-            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
-            title="Toggle typing animation demo"
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleReset}
+            icon={RotateCcw}
           >
-            {isTyping ? 'Hide Typing Demo' : 'Show Typing Demo'}
-          </button>
+            New Chat
+          </Button>
         </div>
       </div>
 
       {/* Suggested Prompt Chips */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
         <span className="text-xs font-semibold text-slate-400 shrink-0">Try asking:</span>
-        {MOCK_PROMPT_SUGGESTIONS.map((prompt, i) => (
+        {PROMPT_SUGGESTIONS.map((prompt, i) => (
           <button
             key={i}
             onClick={() => handleSelectPrompt(prompt)}
@@ -138,7 +159,7 @@ export default function AiChatPage() {
 
       {/* Chat Messages Container */}
       <Card className="p-4 sm:p-6 min-h-[480px] max-h-[600px] overflow-y-auto space-y-5 bg-slate-50/50">
-        
+
         {messages.map((msg) => {
           const isUser = msg.sender === 'user';
           return (
@@ -159,7 +180,7 @@ export default function AiChatPage() {
 
               {/* Message Bubble */}
               <div className={`max-w-xl space-y-1.5 ${isUser ? 'items-end text-right' : 'items-start text-left'}`}>
-                
+
                 <div
                   className={`p-4 rounded-2xl text-xs sm:text-sm leading-relaxed shadow-xs ${
                     isUser
@@ -168,18 +189,6 @@ export default function AiChatPage() {
                   }`}
                 >
                   <div className="whitespace-pre-line">{msg.text}</div>
-
-                  {/* AI Evidence Sources */}
-                  {msg.sources && (
-                    <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
-                      <span className="font-semibold text-slate-600">Verified Sources:</span>
-                      {msg.sources.map((s, idx) => (
-                        <span key={idx} className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
 
                 <div className="text-[10px] text-slate-400 px-1">
@@ -191,7 +200,7 @@ export default function AiChatPage() {
         })}
 
         {/* Typing Indicator Animation */}
-        {isTyping && (
+        {isSending && (
           <div className="flex items-start gap-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs">
               <Bot className="w-5 h-5" />
@@ -205,7 +214,16 @@ export default function AiChatPage() {
           </div>
         )}
 
+        <div ref={messagesEndRef} />
+
       </Card>
+
+      {error && (
+        <div className="rounded-xl bg-rose-50 border border-rose-200 p-3 flex items-start gap-2 text-xs text-rose-800">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>{error}</span>
+        </div>
+      )}
 
       {/* Input Bar */}
       <div className="bg-white rounded-2xl border border-slate-200 p-2.5 shadow-sm flex items-center gap-2">
@@ -239,10 +257,11 @@ export default function AiChatPage() {
           variant="ai"
           size="sm"
           onClick={handleSendMessage}
-          icon={Send}
+          disabled={isSending || !inputText.trim()}
+          icon={isSending ? Sparkles : Send}
           className="shadow-xs"
         >
-          Send
+          {isSending ? 'Sending...' : 'Send'}
         </Button>
       </div>
 

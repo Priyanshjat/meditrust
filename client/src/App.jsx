@@ -39,6 +39,7 @@ import AdminOrdersPage from './pages/admin/AdminOrdersPage';
 import AdminProductsPage from './pages/admin/AdminProductsPage';
 import AdminDoctorsPage from './pages/admin/AdminDoctorsPage';
 import AdminAllUsersPage from './pages/admin/AdminAllUsersPage';
+import AdminPathologistsPage from './pages/admin/AdminPathologistsPage';
 
 export default function App() {
 

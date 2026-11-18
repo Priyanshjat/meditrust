@@ -8,6 +8,27 @@ import Pathologist from "../../models/pathologistModel.js";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+// Single place to change the model used by every AI feature.
+const AI_MODEL = "gemini-3.8-flash";
+
+// Gemini occasionally returns transient 503 "high demand" errors, so retry
+// those a couple of times before surfacing the failure to the client.
+async function generateContent(params, attempts = 3) {
+    for (let attempt = 1; ; attempt++) {
+        try {
+            return await ai.models.generateContent(params);
+        } catch (error) {
+            const isTransient = /503|UNAVAILABLE|overloaded|high demand/i.test(
+                String(error?.message || "")
+            );
+            if (!isTransient || attempt >= attempts) {
+                throw error;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+    }
+}
+
 const PROMPT = `
 You are a medical prescription parser. Extract the following from this 
 prescription image and return ONLY valid JSON, no markdown fences, no explanation:
@@ -37,20 +58,45 @@ function fileToBase64(path) {
     return fs.readFileSync(path).toString("base64");
 }
 
+// Temp files may already have been removed by the Cloudinary middleware,
+// so never let cleanup throw.
+function safeUnlink(path) {
+    try {
+        if (path && fs.existsSync(path)) {
+            fs.unlinkSync(path);
+        }
+    } catch (error) {
+        console.error("Failed to remove temp file:", error.message);
+    }
+}
+
+// Gemini occasionally wraps JSON in markdown fences despite the config;
+// strip them before parsing so a stray fence doesn't fail the request.
+function parseJson(text = "") {
+    const cleaned = text
+        .trim()
+        .replace(/^```(?:json)?/i, "")
+        .replace(/```$/, "")
+        .trim();
+    return JSON.parse(cleaned);
+}
+
 
 const explainPrescription = async (req, res) => {
 
     let userId = req.user.id
 
+    if (!req.file) {
+        return res.status(400).json({ error: "No image uploaded" });
+    }
+
+    const filePath = req.file.path;
+
     try {
-        if (!req.file) {
-            return res.status(400).json({ error: "No image uploaded" });
-        }
+        const base64 = fileToBase64(filePath);
 
-        const base64 = fileToBase64(req.file.path);
-
-        const response = await ai.models.generateContent({
-            model: "gemini-3.6-flash",
+        const response = await generateContent({
+            model: AI_MODEL,
             contents: [
                 {
                     role: "user",
@@ -70,11 +116,12 @@ const explainPrescription = async (req, res) => {
             },
         });
 
-        const image = await uploadToCloudinary(req.file.path)
-        fs.unlinkSync(req.file.path); // cleanup temp file
+        const data = parseJson(response.text);
 
-        const text = response.text; // property, not a function, in the new SDK
-        const data = JSON.parse(text);
+        const image = await uploadToCloudinary(filePath);
+        if (!image?.secure_url) {
+            return res.status(500).json({ error: "Could not store the uploaded prescription image" });
+        }
 
         const prescription = new Prescription({
             user: userId,
@@ -91,15 +138,13 @@ const explainPrescription = async (req, res) => {
 
         res.status(200).json(prescription)
 
-
     } catch (err) {
-        fs.unlinkSync(req.file.path); // cleanup temp file
         console.error(err);
         res.status(500).json({ error: "Extraction failed", details: err.message });
+    } finally {
+        safeUnlink(filePath); // cleanup temp file
     }
 }
-
-
 
 
 
@@ -108,11 +153,30 @@ const findMedicines = async (req, res) => {
 
     const pid = req.params.pid
 
-    const products = await Product.find()
-    const pathologists = await Pathologist.find()
-    const prescription = await Prescription.findById(pid)
+    try {
+        const prescription = await Prescription.findById(pid)
 
-    const MEDICINE_FOUNDER_PROMPT = `You are a medicine and pathology-test availability checker for a healthcare platform.
+        if (!prescription) {
+            return res.status(404).json({ error: "Prescription not found" })
+        }
+
+        if (String(prescription.user) !== String(req.user.id)) {
+            return res.status(403).json({ error: "You are not allowed to view this prescription" })
+        }
+
+        const products = await Product.find()
+            .select("name description price stock expiresOn isActive")
+        const pathologists = await Pathologist.find()
+            .select("laboratoryName laboratoryAddress specialization consultationFee availableDays workingHours isActive")
+
+        const data = JSON.stringify({
+            today: new Date().toISOString().slice(0, 10),
+            products,
+            pathologists,
+            medicines: prescription.medicines,
+        })
+
+        const MEDICINE_FOUNDER_PROMPT = `You are a medicine and pathology-test availability checker for a healthcare platform.
 
 You will receive THREE pieces of data in JSON:
 1. "products" — the pharmacy's inventory (id, name, description, price, stock, expiresOn, isActive)
@@ -120,7 +184,7 @@ You will receive THREE pieces of data in JSON:
 3. "medicines" — a list of medicines extracted via OCR from a doctor's prescription (name, dosage, frequency, duration, notes)
 
 YOUR TASK:
-For each entry in "medicines", determine whether it is available in "products" using fuzzy/partial name matching (OCR text is often noisy — e.g. "O-claram-625" may match "Amoxyclav 625" or similar; match on best semantic/brand similarity, not exact string equality). Only mark a product as available if isActive is true, stock > 0, and it is not expired (compare expiresOn to today's date).
+For each entry in "medicines", determine whether it is available in "products" using fuzzy/partial name matching (OCR text is often noisy — e.g. "O-claram-625" may match "Amoxyclav 625" or similar; match on best semantic/brand similarity, not exact string equality). Only mark a product as available if isActive is true, stock > 0, and it is not expired (compare expiresOn to the "today" date in the data).
 
 If any prescription line looks like a lab test / diagnostic order rather than a medicine (e.g. "CBC", "CT Scan", "Blood Sugar"), match it against pathologists' "specialization" arrays instead, and list which labs offer it, their consultationFee, and availableDays/workingHours.
 
@@ -169,13 +233,11 @@ RULES:
 - Be conservative: if you're not reasonably confident of a match, set matched_product_name to null and available to false rather than guessing.
 - Do not include any explanation outside the JSON object.
 
-Here is the data: ${{ products, pathologists, medicines: prescription.medicines }}
+Here is the data: ${data}
 `
 
-    try {
-
-        const response = await ai.models.generateContent({
-            model: "gemini-3.6-flash",
+        const response = await generateContent({
+            model: AI_MODEL,
             contents: [
                 {
                     role: "user",
@@ -189,47 +251,36 @@ Here is the data: ${{ products, pathologists, medicines: prescription.medicines 
             },
         });
 
+        const parsed = parseJson(response.text);
 
-        const text = response.text; // property, not a function, in the new SDK
-        const data = JSON.parse(text);
-
-        res.json(data)
-
+        res.json(parsed)
 
     } catch (error) {
-        res.status(409)
-        throw new Error("Error In Getting Data From Server!")
+        console.error(error);
+        res.status(502).json({ error: "Error In Getting Data From Server!", details: error.message })
     }
-
-
-
-
-    res.json({ products, pathologists, medicines: prescription.medicines })
-
-
-
 }
 
 
 const chatWithAi = async (req, res) => {
 
-    const { text } = req.body
+    const { text } = req.body || {}
 
-    if (!text) {
-        res.status(409)
-        throw new Error("Please Fill All Details")
+    if (!text || !text.trim()) {
+        return res.status(400).json({ error: "Please provide a message" })
     }
 
     const SYSTEM_INSTRUCTION = `You are MediTrust's basic health guidance assistant. Rules you MUST follow:
 - Give only general, non-diagnostic health information.
 - Never provide a diagnosis and never recommend specific dosages.
-- Keep answers short and easy to understand.
+- Never recommend specific prescription medicine names.
+- Keep answers short and easy to understand (max 150 words).
 - Always suggest booking a real doctor on MediTrust for anything specific or urgent.
 - If the question is an emergency or serious symptom, urge seeking immediate professional care. here is my query : ${text}`
 
     try {
-        const response = await ai.models.generateContent({
-            model: "gemini-3.6-flash",
+        const response = await generateContent({
+            model: AI_MODEL,
             contents: [
                 {
                     role: "user",
@@ -238,34 +289,15 @@ const chatWithAi = async (req, res) => {
                     ],
                 },
             ],
-            config: {
-                responseMimeType: "application/json",
-            },
         });
 
+        res.json({ reply: response.text })
 
-        const text = response.text; // property, not a function, in the new SDK
-        const data = JSON.parse(text);
-
-        res.json(data)
     } catch (error) {
         console.log(error.message)
-        res.status(409)
-        throw new Error("Error In Getting Data From Server!")
+        res.status(502).json({ error: "Error In Getting Data From Server!", details: error.message })
     }
-
-
-
-
-
 }
-
-
-
-
-
-
-
 
 
 const aiController = {
@@ -273,5 +305,3 @@ const aiController = {
 }
 
 export default aiController
-
-
