@@ -4,8 +4,6 @@
 
 MediTrust is a full-stack healthcare platform where patients can upload a prescription, get it automatically read and structured using AI, check medicine availability on the platform (with alternatives from other companies), book doctor appointments, book pathology/lab tests, and chat for basic health guidance — all in one place.
 
-Built and maintained by **[E-Skills Web](https://eskillsweb.com)**.
-
 ---
 
 ## Table of Contents
@@ -192,7 +190,7 @@ meditrust/
 
 ```bash
 # Clone the repo
-git clone https://github.com/imrankhan919/meditrust.git
+git clone https://github.com/Priyanshjat/meditrust.git
 cd meditrust
 
 # Install dependencies
@@ -254,10 +252,4 @@ MediTrust is built for educational and demonstration purposes. It is **not a cer
 
 ## About
 
-MediTrust is built and maintained by **E-Skills Web** ([eskillsweb.com](https://eskillsweb.com)), a tech training institute based in Indore, India, with branches in Mandsaur and Udaipur — also operating under the **Robotwala EdTech** brand.
-
-- 🌐 Website: [eskillsweb.com](https://eskillsweb.com)
-- 📸 Instagram: [@eskillsweb](https://instagram.com/eskillsweb)
-- 💻 GitHub: [imrankhan919](https://github.com/imrankhan919)
-
-© E-Skills Web. All rights reserved.
+MediTrust is a full-stack healthcare platform project focused on AI-assisted prescription understanding, pharmacy availability checks, doctor appointments, and lab test bookings.
